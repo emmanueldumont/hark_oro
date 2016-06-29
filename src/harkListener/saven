@@ -1,0 +1,197 @@
+/*
+		int cpt =0;
+		int sameSrcNb = -1; // same source number in the database
+		int currentTime = srvVal[0].timeStamp; // Current timestamp
+		
+		int i = 0; // Counter
+		double distance = 0; // Distance between two sources
+		
+		for(cpt = 0; cpt < size; cpt++)
+		{
+		  i = 0;
+		  bool next = false; // Boolean use to know if we have to continue or not
+		  
+		  // First compare if same source as a saved one
+		  do
+		  {
+		    
+		    if(srvVal[cpt].id == database[i].id)
+		    {
+		      // Check if there is change, if so, send new data
+		      if( (srvVal[cpt].x != database[i].x) || (srvVal[cpt].y != database[i].y) || (srvVal[cpt].z != database[i].z) || (srvVal[cpt].angle != database[i].angle) )
+		      {
+		        // Clear previous data and re-add it is faster than clear each data and re add them as update do not work
+		        ROS_INFO("Global update s%d",database[i].id);
+		        
+		        clearSource(srvVal[cpt].id);
+		        database[i].timeStamp = srvVal[cpt].timeStamp;
+				    database[i].id= srvVal[cpt].id;
+				    database[i].x= srvVal[cpt].x;
+				    database[i].y= srvVal[cpt].y;
+				    database[i].z= srvVal[cpt].z;
+				    database[i].angle= srvVal[cpt].angle;
+				          
+            addSource(&database[i]);
+            break;
+		      }
+		      // else nothing to do !
+		      next = true;
+		    }
+		    
+		    i += 1;
+		    
+		  }while( i < gNbSourceValues );
+		  
+		  // If we have update a previously stored source
+		  if(next)
+		  {
+		    continue;
+		  }
+		  else
+		  {
+		    i=0;
+	    }
+		  
+			// second compare position of sources with each other, if closed : Euclidian distance, update previous timestamp otherwise, add it
+			do
+			{
+			  if(database[i].timeStamp != 0 )
+			  {
+			    // Determine the angle difference:
+			    distance = abs(database[i].angle - srvVal[cpt].angle);
+			    
+			    // If the angle difference is small then it might be the same sources
+			    if( distance < MAX_ANGLE_DISTANCE )
+			    {
+			      // Determine the euclidian distance : sqrt( ( x1-x2 )^2 + ( y1-y2 )^2 + ( z1-z2 )^2 )
+			      distance = sqrt( pow(database[i].x - srvVal[cpt].x, 2) + pow(database[i].y - srvVal[cpt].y, 2) + pow(database[i].z - srvVal[cpt].z, 2) );
+			      
+			      if(distance < MAX_EUCLIDIAN_DISTANCE)
+			      {
+			        // Same point: Update the timestamp
+			        database[i].timeStamp = srvVal[cpt].timeStamp;
+			        
+			        ROS_INFO("Update timestamp s%d",database[i].id);
+			        // Update timestamp in oro
+			        updateTimestamp(database[i].id, database[i].timeStamp);
+			        
+			        // BREAKPOINT: if a corresponding point is found, analyze next source, if there is echo, filters will remove it later
+			        next = true; // Next now indicates if a similar point has been found
+			        break;
+			      }
+			    }
+			    // Increment i
+				  i +=1;
+				  
+				}
+				else
+				{
+				  // If timestamp is equal to 0 it means we are at the end so, do not loop again -> 
+				  break;
+				}
+				
+			}while( i < gNbSourceValues );
+			
+			// If new add it in the database
+			if( (next == false ) && ( (gNbSourceValues+1) < NB_SOURCE_VALUES_MAX) )
+			{
+				database[gNbSourceValues].timeStamp = srvVal[cpt].timeStamp;
+				database[gNbSourceValues].id= srvVal[cpt].id;
+				database[gNbSourceValues].x= srvVal[cpt].x;
+				database[gNbSourceValues].y= srvVal[cpt].y;
+				database[gNbSourceValues].z= srvVal[cpt].z;
+				database[gNbSourceValues].angle= srvVal[cpt].angle;
+				
+				ROS_INFO("ADD s%d",database[gNbSourceValues].id);
+        addSource(&database[gNbSourceValues]);
+        
+				gNbSourceValues += 1; // Add one new sources
+			}
+			else
+			{
+				// Otherwise update last time heard
+				if(sameSrcNb > -1)
+				{
+					database[sameSrcNb].timeStamp= srvVal[cpt].timeStamp;
+					sameSrcNb = -1;
+				}
+			}
+			
+		}
+		
+		// Remove old sources
+		// Keep them maximum X sec (depending on MAX_TIME)
+    // Sort them from most recent to last
+    int table[2][gNbSourceValues];
+    
+    fill_n(table[0], gNbSourceValues, 0);
+    fill_n(table[1], gNbSourceValues, 0);
+    
+    t_sourceValues buffSrc[gNbSourceValues];
+    
+    // Init the buffer
+    for(int cpt = 0; cpt < gNbSourceValues; cpt++)
+    {
+      buffSrc[cpt].timeStamp= database[cpt].timeStamp;
+      buffSrc[cpt].id = database[cpt].id;
+      buffSrc[cpt].x= database[cpt].x;
+      buffSrc[cpt].y= database[cpt].y;
+      buffSrc[cpt].z= database[cpt].z;
+      buffSrc[cpt].angle= database[cpt].angle;
+    }
+    
+    //-> Sort sources by timestamp: From recent to older
+    for(int cptSort=0; cptSort < gNbSourceValues; cptSort++)
+    {
+      // Get the timestamp and store it
+      table[0][cptSort] = database[cptSort].timeStamp;
+    }
+    
+    int smallest = 0;
+    int cptSmall = 0;
+    // Find greatest timestamp, put it on left and loop
+    for(int cptAll=0; cptAll < gNbSourceValues; cptAll++)
+    {
+      smallest = cptAll;
+      for(cptSmall = cptAll+1; cptSmall < gNbSourceValues; cptSmall++)
+      {
+        if( table[0][smallest] < table[0][cptSmall] ) {
+          smallest = cptSmall;}
+      }
+      table[1][cptAll] = smallest;
+    }
+    
+    int nbSrcRmv = 0; // Number of sources removed
+    
+    // Sort the global table
+    for(int cpt = 0; cpt < gNbSourceValues; cpt++)
+    {
+      // If timestamp is not too old, copy data in global table
+      if( (currentTime - buffSrc[ table[1][cpt] ].timeStamp)  < MAX_TIME )
+      {
+        database[cpt].timeStamp = buffSrc[ table[1][cpt] ].timeStamp;
+        database[cpt].id = buffSrc[ table[1][cpt] ].id;
+        database[cpt].x = buffSrc[ table[1][cpt] ].x;
+        database[cpt].y = buffSrc[ table[1][cpt] ].y;
+        database[cpt].z = buffSrc[ table[1][cpt] ].z;
+        database[cpt].angle = buffSrc[ table[1][cpt] ].angle;
+      }
+      else // else remove them in the ontology and store a zero data
+      {
+      
+        ROS_INFO("Clear too old s%d",database[cpt].id);
+        clearSource(buffSrc[ table[1][cpt] ].id);
+        
+        database[cpt].timeStamp = 0;
+        database[cpt].id = 0;
+        database[cpt].x = 0;
+        database[cpt].y = 0;
+        database[cpt].z = 0;
+        database[cpt].angle = 0;
+        
+        nbSrcRmv +=1;
+                
+      }
+    }
+    
+    gNbSourceValues = gNbSourceValues - nbSrcRmv;*/
